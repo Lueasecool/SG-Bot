@@ -129,33 +129,7 @@ class DiffusionPoint(nn.Module):
         return loss
 
 
-    def gen_samples(self, shape, device, condition=None, condition_cross=None, noise_fn=torch.randn,
+    def gen_samples_sg(self, shape, device, obj_embed, triples=None, condition=None, noise_fn=torch.randn,
                     clip_denoised=True, keep_running=False):
-        return self.diffusion.p_sample_loop(self._denoise, shape=shape, device=device, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                            clip_denoised=clip_denoised,
-                                            keep_running=keep_running)
-
-    def gen_sample_traj(self, shape, device, freq, condition=None, condition_cross=None, noise_fn=torch.randn,
-                    clip_denoised=True,keep_running=False):
-        return self.diffusion.p_sample_loop_trajectory(self._denoise, shape=shape, device=device, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn, freq=freq,
-                                                       clip_denoised=clip_denoised,
-                                                       keep_running=keep_running)
-    
-
-    def gen_samples_ddim(self, shape, device, condition=None, condition_cross=None, noise_fn=torch.randn,
-                    clip_denoised=True, sampling_timesteps=50, ddim_sampling_eta=0., return_all_timesteps=False):
-        return self.diffusion.ddim_sample_loop(self._denoise, shape=shape, device=device, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                            clip_denoised=clip_denoised, sampling_timesteps=sampling_timesteps, ddim_sampling_eta=ddim_sampling_eta, return_all_timesteps=return_all_timesteps)
-    
-    def complete_samples(self, shape, device, condition=None, condition_cross=None, noise_fn=torch.randn,
-                    clip_denoised=True, keep_running=False, partial_boxes=None):
-        return self.diffusion.p_sample_loop_complete(self._denoise, shape=shape, device=device, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                            clip_denoised=clip_denoised,
-                                            keep_running=keep_running, partial_boxes=partial_boxes)
-
-    def arrange_samples(self, shape, device, condition=None, condition_cross=None, noise_fn=torch.randn,
-                    clip_denoised=True, keep_running=False, input_boxes=None):
-        
-        return self.diffusion.p_sample_loop_arrange(self._denoise, shape=shape, device=device, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                            clip_denoised=clip_denoised,
-                                            keep_running=keep_running, input_boxes=input_boxes)
+        return self.diffusion.p_sample_loop_sg(self._denoise, shape=shape, device=device, obj_embed=obj_embed, triples=triples, condition=condition, noise_fn=noise_fn,
+                                            clip_denoised=clip_denoised, keep_running=keep_running)

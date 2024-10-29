@@ -208,13 +208,9 @@ class GaussianDiffusion:
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
 
-    def p_mean_variance(self, denoise_fn, data, t, condition, condition_cross, clip_denoised: bool, return_pred_xstart: bool):
+    def p_mean_variance(self, denoise_fn, data, t, obj_embed, triples, condition, clip_denoised: bool, return_pred_xstart: bool):
 
-        preds = self.model_predictions(denoise_fn, data, t, condition, condition_cross, x_self_cond=None)
-        x_recon = preds.pred_x_start
-
-        if clip_denoised:
-            x_recon.clamp_(-1., 1.)
+        model_output = denoise_fn(data, obj_embed, triples, t, condition)
 
 
         if self.model_var_type in ['fixedsmall', 'fixedlarge']:
@@ -230,7 +226,25 @@ class GaussianDiffusion:
         else:
             raise NotImplementedError(self.model_var_type)
 
-        model_mean, _, _ = self.q_posterior_mean_variance(x_start=x_recon, x_t=data, t=t)
+        if self.model_mean_type == 'eps':
+            x_recon = self._predict_xstart_from_eps(data, t=t, eps=model_output)
+
+            if clip_denoised:
+                x_recon = torch.clamp(x_recon, -1.0, 1.0) 
+
+            model_mean, _, _ = self.q_posterior_mean_variance(x_start=x_recon, x_t=data, t=t)
+        
+        elif self.model_mean_type == 'x0':
+            x_recon = model_output
+
+            if clip_denoised:
+                x_recon = torch.clamp(x_recon, -1.0, 1.0) 
+
+            eps = self._predict_eps_from_start(data, t=t, x0=x_recon)
+
+            model_mean, _, _ = self.q_posterior_mean_variance(x_start=x_recon, x_t=data, t=t)
+        else:
+            raise NotImplementedError(self.loss_type)
 
 
         assert model_mean.shape == x_recon.shape == data.shape
@@ -239,14 +253,14 @@ class GaussianDiffusion:
             return model_mean, model_variance, model_log_variance, x_recon
         else:
             return model_mean, model_variance, model_log_variance
-
     ''' samples '''
 
-    def p_sample(self, denoise_fn, data, t, condition, condition_cross, noise_fn, clip_denoised=False, return_pred_xstart=False):
+
+    def p_sample_sg(self, denoise_fn, data, t, obj_embed, triples, condition, noise_fn, clip_denoised=False, return_pred_xstart=False):
         """
         Sample from the model
         """
-        model_mean, _, model_log_variance, pred_xstart = self.p_mean_variance(denoise_fn, data=data, t=t, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised,
+        model_mean, _, model_log_variance, pred_xstart = self.p_mean_variance(denoise_fn, data=data, t=t, obj_embed=obj_embed, triples=triples, condition=condition, clip_denoised=clip_denoised,
                                                                  return_pred_xstart=True)
         noise = noise_fn(size=data.shape, dtype=data.dtype, device=data.device)
         assert noise.shape == data.shape
@@ -256,10 +270,8 @@ class GaussianDiffusion:
         sample = model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise
         assert sample.shape == pred_xstart.shape
         return (sample, pred_xstart) if return_pred_xstart else sample
-
-
-    def p_sample_loop(self, denoise_fn, shape, device, condition, condition_cross,
-                      noise_fn=torch.randn, clip_denoised=True, keep_running=False):
+    
+    def p_sample_loop_sg(self, denoise_fn, shape, device, obj_embed, triples, condition, noise_fn=torch.randn, clip_denoised=True, keep_running=False):
         """
         Generate samples
         keep_running: True if we run 2 x num_timesteps, False if we just run num_timesteps
@@ -267,149 +279,15 @@ class GaussianDiffusion:
         """
 
         assert isinstance(shape, (tuple, list))
-        img_t = noise_fn(size=shape, dtype=torch.float, device=device)
-        for t in reversed(range(0, self.num_timesteps if not keep_running else len(self.betas))):
+        x_t = noise_fn(size=shape, dtype=torch.float, device=device)
+        for t in tqdm(reversed(range(0, self.num_timesteps if not keep_running else len(self.betas)))):
             t_ = torch.empty(shape[0], dtype=torch.int64, device=device).fill_(t)
-            img_t = self.p_sample(denoise_fn=denoise_fn, data=img_t,t=t_, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
+            x_t = self.p_sample_sg(denoise_fn=denoise_fn, data=x_t, t=t_, obj_embed=obj_embed, triples=triples, condition=condition, noise_fn=noise_fn,
                                   clip_denoised=clip_denoised, return_pred_xstart=False)
 
-        assert img_t.shape == shape
-        return img_t
+        assert x_t.shape == shape
+        return x_t
 
-    def p_sample_loop_trajectory(self, denoise_fn, shape, device, freq, condition, condition_cross,
-                                 noise_fn=torch.randn,clip_denoised=True, keep_running=False):
-        """
-        Generate samples, returning intermediate images
-        Useful for visualizing how denoised images evolve over time
-        Args:
-          repeat_noise_steps (int): Number of denoising timesteps in which the same noise
-            is used across the batch. If >= 0, the initial noise is the same for all batch elemements.
-        """
-        assert isinstance(shape, (tuple, list))
-
-        total_steps =  self.num_timesteps if not keep_running else len(self.betas)
-
-        img_t = noise_fn(size=shape, dtype=torch.float, device=device)
-        imgs = [img_t]
-        for t in reversed(range(0,total_steps)):
-
-            t_ = torch.empty(shape[0], dtype=torch.int64, device=device).fill_(t)
-            img_t = self.p_sample(denoise_fn=denoise_fn, data=img_t, t=t_, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                  clip_denoised=clip_denoised,
-                                  return_pred_xstart=False)
-            if t % freq == 0 or t == total_steps-1:
-                imgs.append(img_t)
-
-        assert imgs[-1].shape == shape
-        return imgs
-    
-    ## from https://github.com/lucidrains/denoising-diffusion-pytorch/blob/main/denoising_diffusion_pytorch/denoising_diffusion_pytorch.py
-    @torch.no_grad()
-    def ddim_sample_loop(self, denoise_fn, shape, device, condition, condition_cross, noise_fn=torch.randn, clip_denoised=True, sampling_timesteps=50, ddim_sampling_eta=0., return_all_timesteps = False):
-        self.ddim_sampling_eta = ddim_sampling_eta
-        self.sampling_timesteps = sampling_timesteps
-        batch, total_timesteps, sampling_timesteps, eta = shape[0], self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta
-
-        times = torch.linspace(-1, total_timesteps - 1, steps = sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
-        times = list(reversed(times.int().tolist()))
-        time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
-
-        img = noise_fn(size=shape, dtype=torch.float, device=device) 
-        imgs = [img]
-
-        x_start = None
-
-        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
-            t_ = torch.empty(shape[0], dtype=torch.int64, device=device).fill_(time)
-    
-            self_cond = x_start if self.self_condition else None
-            pred_noise, x_start, *_ = self.model_predictions(img, t_, condition, condition_cross, self_cond, clip_x_start = True)
-                
-                
-            if time_next < 0:
-                img = x_start
-                imgs.append(img)
-                continue
-
-            alpha = self.alphas_cumprod[time]
-            alpha_next = self.alphas_cumprod[time_next]
-
-            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
-            c = (1 - alpha_next - sigma ** 2).sqrt()
-
-            noise = noise_fn(size=shape, dtype=torch.float, device=device)  #torch.randn_like(img)
-
-            img = x_start * alpha_next.sqrt() + \
-                  c * pred_noise + \
-                  sigma * noise
-
-            imgs.append(img)
-
-        ret = img if not return_all_timesteps else imgs
-
-        return ret
-    
-
-    def p_sample_loop_complete(self, denoise_fn, shape, device, condition, condition_cross,
-                      noise_fn=torch.randn, clip_denoised=True, keep_running=False, partial_boxes=None):
-        """
-        Complete samples based on partial samples
-        keep_running: True if we run 2 x num_timesteps, False if we just run num_timesteps
-
-        """
-
-        assert isinstance(shape, (tuple, list))
-        img_t = noise_fn(size=shape, dtype=torch.float, device=device)
-        for t in reversed(range(0, self.num_timesteps if not keep_running else len(self.betas))):
-            t_ = torch.empty(shape[0], dtype=torch.int64, device=device).fill_(t)
-
-            # diffusion clean scenes
-            noise =  noise_fn(size=partial_boxes.shape, dtype=torch.float, device=device)
-            partial_boxes_t = self.q_sample(x_start=partial_boxes, t=t_, noise=noise)
-            num_partial = partial_boxes_t.shape[1]
-
-            # combine noisy version of clean scenes & denoising scenes
-            img_t = torch.cat([ partial_boxes_t, img_t[:, num_partial:, :] ], dim=1).contiguous()
-
-            # reverse diffusion
-            img_t = self.p_sample(denoise_fn=denoise_fn, data=img_t,t=t_, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                clip_denoised=clip_denoised, return_pred_xstart=False)
-            if t == 0:
-                print('last:', t, self.num_timesteps, len(self.betas))
-                img_t = torch.cat([ partial_boxes, img_t[:, num_partial:, :] ], dim=1).contiguous()
-
-        assert img_t.shape == shape
-        return img_t
-
-    def p_sample_loop_arrange(self, denoise_fn, shape, device, condition, condition_cross,
-                      noise_fn=torch.randn, clip_denoised=True, keep_running=False, input_boxes=None):
-        """
-        Arrangement: complete other properies based on some propeties
-        keep_running: True if we run 2 x num_timesteps, False if we just run num_timesteps
-
-        """
-
-        assert isinstance(shape, (tuple, list))
-        img_t = noise_fn(size=(shape[0], shape[1], self.translation_dim+self.angle_dim), dtype=torch.float, device=device)
-        for t in reversed(range(0, self.num_timesteps if not keep_running else len(self.betas))):
-            t_ = torch.empty(shape[0], dtype=torch.int64, device=device).fill_(t)
-
-            # reverse diffusion
-            img_t = self.p_sample(denoise_fn=denoise_fn, data=img_t,t=t_, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                clip_denoised=clip_denoised, return_pred_xstart=False)
-            if t == 0:
-                print('last:', t, self.num_timesteps, len(self.betas))
-                img_t_trans = img_t[:, :, 0:self.translation_dim]
-                img_t_angle = img_t[:, :, self.translation_dim:] 
-                
-                input_boxes_trans = input_boxes[:, :, 0:self.translation_dim]
-                input_boxes_size  = input_boxes[:, :, self.translation_dim:self.translation_dim+self.size_dim]  
-                input_boxes_angle = input_boxes[:, :, self.translation_dim+self.size_dim:self.bbox_dim] 
-                input_boxes_other = input_boxes[:, :, self.bbox_dim:] 
-                img_t = torch.cat([ img_t_trans, input_boxes_size, img_t_angle, input_boxes_other ], dim=-1).contiguous()
-
-        assert img_t.shape == shape
-        return img_t
 
 
     '''losses'''
@@ -529,99 +407,4 @@ class GaussianDiffusion:
             assert vals_bt_.shape == mse_bt_.shape == torch.Size([B, T]) and \
                    total_bpd_b.shape == prior_bpd_b.shape ==  torch.Size([B])
             return total_bpd_b.mean(), vals_bt_.mean(), prior_bpd_b.mean(), mse_bt_.mean()
-def axis_aligned_bbox_overlaps_3d(bboxes1,
-                                  bboxes2,
-                                  mode='iou',
-                                  is_aligned=False,
-                                  eps=1e-6):
-    """Calculate overlap between two set of axis aligned 3D bboxes. If
-        ``is_aligned`` is ``False``, then calculate the overlaps between each bbox
-        of bboxes1 and bboxes2, otherwise the overlaps between each aligned pair of
-        bboxes1 and bboxes2.
-        Args:
-            bboxes1 (Tensor): shape (B, m, 6) in <x1, y1, z1, x2, y2, z2>
-                format or empty.
-            bboxes2 (Tensor): shape (B, n, 6) in <x1, y1, z1, x2, y2, z2>
-                format or empty.
-                B indicates the batch dim, in shape (B1, B2, ..., Bn).
-                If ``is_aligned`` is ``True``, then m and n must be equal.
-            mode (str): "iou" (intersection over union) or "giou" (generalized
-                intersection over union).
-            is_aligned (bool, optional): If True, then m and n must be equal.
-                Defaults to False.
-            eps (float, optional): A value added to the denominator for numerical
-                stability. Defaults to 1e-6.
-        Returns:
-            Tensor: shape (m, n) if ``is_aligned`` is False else shape (m,)
-    """
 
-    assert mode in ['iou', 'giou'], f'Unsupported mode {mode}'
-    # Either the boxes are empty or the length of boxes's last dimension is 6
-    assert (bboxes1.size(-1) == 6 or bboxes1.size(0) == 0)
-    assert (bboxes2.size(-1) == 6 or bboxes2.size(0) == 0)
-
-    # Batch dim must be the same
-    # Batch dim: (B1, B2, ... Bn)
-    assert bboxes1.shape[:-2] == bboxes2.shape[:-2]
-    batch_shape = bboxes1.shape[:-2]
-
-    rows = bboxes1.size(-2)
-    cols = bboxes2.size(-2)
-    if is_aligned:
-        assert rows == cols
-
-    if rows * cols == 0:
-        if is_aligned:
-            return bboxes1.new(batch_shape + (rows, ))
-        else:
-            return bboxes1.new(batch_shape + (rows, cols))
-
-    area1 = (bboxes1[..., 3] -
-             bboxes1[..., 0]) * (bboxes1[..., 4] - bboxes1[..., 1]) * (
-                 bboxes1[..., 5] - bboxes1[..., 2])
-    area2 = (bboxes2[..., 3] -
-             bboxes2[..., 0]) * (bboxes2[..., 4] - bboxes2[..., 1]) * (
-                 bboxes2[..., 5] - bboxes2[..., 2])
-
-    if is_aligned:
-        lt = torch.max(bboxes1[..., :3], bboxes2[..., :3])  # [B, rows, 3]
-        rb = torch.min(bboxes1[..., 3:], bboxes2[..., 3:])  # [B, rows, 3]
-
-        wh = (rb - lt).clamp(min=0)  # [B, rows, 2]
-        overlap = wh[..., 0] * wh[..., 1] * wh[..., 2]
-
-        if mode in ['iou', 'giou']:
-            union = area1 + area2 - overlap
-        else:
-            union = area1
-        if mode == 'giou':
-            enclosed_lt = torch.min(bboxes1[..., :3], bboxes2[..., :3])
-            enclosed_rb = torch.max(bboxes1[..., 3:], bboxes2[..., 3:])
-    else:
-        lt = torch.max(bboxes1[..., :, None, :3],
-                       bboxes2[..., None, :, :3])  # [B, rows, cols, 3]
-        rb = torch.min(bboxes1[..., :, None, 3:],
-                       bboxes2[..., None, :, 3:])  # [B, rows, cols, 3]
-
-        wh = (rb - lt).clamp(min=0)  # [B, rows, cols, 3]
-        overlap = wh[..., 0] * wh[..., 1] * wh[..., 2]
-
-        if mode in ['iou', 'giou']:
-            union = area1[..., None] + area2[..., None, :] - overlap
-        if mode == 'giou':
-            enclosed_lt = torch.min(bboxes1[..., :, None, :3],
-                                    bboxes2[..., None, :, :3])
-            enclosed_rb = torch.max(bboxes1[..., :, None, 3:],
-                                    bboxes2[..., None, :, 3:])
-
-    eps = union.new_tensor([eps])
-    union = torch.max(union, eps)
-    ious = overlap / union
-    if mode in ['iou']:
-        return ious
-    # calculate gious
-    enclose_wh = (enclosed_rb - enclosed_lt).clamp(min=0)
-    enclose_area = enclose_wh[..., 0] * enclose_wh[..., 1] * enclose_wh[..., 2]
-    enclose_area = torch.max(enclose_area, eps)
-    gious = ious - (enclose_area - union) / enclose_area
-    return gious

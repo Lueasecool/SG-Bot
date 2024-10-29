@@ -74,89 +74,33 @@ class DiffusionScene(Module):
         #     layout_info,condition=None,condition_cross=None)
         
         # return loss,loss_dict
-    def sample(self, room_mask, num_points, point_dim, batch_size=1, text=None, 
-               partial_boxes=None, input_boxes=None, ret_traj=False, ddim=False, clip_denoised=False, freq=40, batch_seeds=None, 
-                ):
-        device = room_mask.device
-        noise = torch.randn((batch_size, num_points, point_dim))#, device=room_mask.device)
+   
+    def sample(self, box_dim, batch_size, obj_embed=None, obj_triples=None, text=None, rel=None, ret_traj=False, ddim=False, clip_denoised=False, freq=40, batch_seeds=None):
 
-        # get the latent feature of room_mask
-        if self.room_mask_condition:
-            room_layout_f = self.fc_room_f(self.feature_extractor(room_mask)) #(B, F)
-            
-        else:
-            room_layout_f = None
-
-        # process instance & class condition f
-        if self.instance_condition:
-            if self.learnable_embedding:
-                instance_indices = torch.arange(self.sample_num_points).long().to(device)[None, :].repeat(room_mask.size(0), 1)
-                instan_condition_f = self.positional_embedding[instance_indices, :]
-            else:
-                instance_label = torch.eye(self.sample_num_points).float().to(device)[None, ...].repeat(room_mask.size(0), 1, 1)
-                instan_condition_f = self.fc_instance_condition(instance_label) 
-        else:
-            instan_condition_f = None
-
-
-        # concat instance and class condition   
-        # concat room_layout_f and instan_class_f
-        if room_layout_f is not None and instan_condition_f is not None:
-            condition = torch.cat([room_layout_f[:, None, :].repeat(1, num_points, 1), instan_condition_f], dim=-1).contiguous()
-        elif room_layout_f is not None:
-            condition = room_layout_f[:, None, :].repeat(1, num_points, 1)
-        elif instan_condition_f is not None:
-            condition = instan_condition_f
-        else:
-            condition = None
-
-        # concat room_partial condition, use partial boxes as input for scene completion
-        if self.room_partial_condition:
-            zeros_boxes = torch.zeros((batch_size, num_points-partial_boxes.shape[1], partial_boxes.shape[2])).float().to(device)
-            partial_input  =  torch.cat([partial_boxes, zeros_boxes], dim=1).contiguous()
-            partial_condition_f = self.fc_partial_condition(partial_input)
-            condition = torch.cat([condition, partial_condition_f], dim=-1).contiguous()
-
-        # concat  room_arrange condition, use input boxes as input for scene completion
-        if self.room_arrange_condition:
-            arrange_input  = torch.cat([ input_boxes[:, :, self.translation_dim:self.translation_dim+self.size_dim], input_boxes[:, :, self.bbox_dim:] ], dim=-1).contiguous()
-            arrange_condition_f = self.fc_arrange_condition(arrange_input)
-            condition = torch.cat([condition, arrange_condition_f], dim=-1).contiguous()
-
-
-        if self.text_condition:
-            if self.text_glove_embedding:
-                condition_cross = self.fc_text_f(text) #sample_params["desc_emb"]
-            elif self.text_clip_embedding:
-                tokenized = clip.tokenize(text).to(device)
-                condition_cross = self.clip_model.encode_text(tokenized)
-            else:
-                tokenized = self.tokenizer(text, return_tensors='pt',padding=True).to(device)
-                #print('tokenized:', tokenized.shape)
-                text_f = self.bertmodel(**tokenized).last_hidden_state
-                print('after bert:', text_f.shape)
-                condition_cross = self.fc_text_f( text_f )
-        else:
-            condition_cross = None
-            
-
-        if input_boxes is not None:
-            print('scene arrangement sampling')
-            samples = self.diffusion.arrange_samples(noise.shape, room_mask.device, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, input_boxes=input_boxes)
-
-        elif partial_boxes is not None:
-            print('scene completion sampling')
-            samples = self.diffusion.complete_samples(noise.shape, room_mask.device, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, partial_boxes=partial_boxes)
-
-        else:
-            print('unconditional / conditional generation sampling')
-            # reverse sampling
-            if ret_traj:
-                samples = self.diffusion.gen_sample_traj(noise.shape, room_mask.device, freq=freq, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised)
-            else:
-                samples = self.diffusion.gen_samples(noise.shape, room_mask.device, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised)
-            
+        noise_shape = (batch_size, box_dim)
+        condition = rel if self.rel_condition else None
+        condition_cross = None
+        # reverse sampling
+        samples = self.df.gen_samples_sg(noise_shape, obj_embed.device, obj_embed, obj_triples, condition=condition, clip_denoised=clip_denoised)
+        
         return samples
+
+    @torch.no_grad()
+    def generate_layout_sg(self, box_dim, text=None, ret_traj=False, ddim=False, clip_denoised=False, batch_seeds=None):
+
+        rel = self.rel
+        obj_embed = self.uc_rel
+        triples = self.preds
+
+        samples = self.sample(box_dim, batch_size=len(obj_embed), obj_embed=obj_embed, obj_triples=triples, text=text, rel=rel, ret_traj=ret_traj, ddim=ddim, clip_denoised=clip_denoised, batch_seeds=batch_seeds)
+        samples_dict = {
+            "sizes": samples[:, 0:self.size_dim].contiguous(),
+            "translations": samples[:, self.size_dim:self.size_dim + self.translation_dim].contiguous(),
+            "angles": samples[:, self.size_dim + self.translation_dim:self.bbox_dim].contiguous(),
+        }
+        
+        return samples_dict
+            
     
 
 def train_on_batch(model, optimizer, sample_params, config):
