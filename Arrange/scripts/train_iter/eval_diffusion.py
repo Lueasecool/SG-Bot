@@ -7,11 +7,16 @@ import random
 import numpy as np
 import torch
 import torch.nn.parallel
+import json
 import torch.utils.data
 from omegaconf import OmegaConf
+from data_util.data_read import my_Dataset
 from utils import render_box
 from eval_helper import batch_torch_destandardize_box_params,postprocess_sincos2arctan,descale_box_params
+from metric import validate_constrains
 
+from scripts.diffusion_Unet.model_unet import DiffusionScene
+from scripts.train_iter.utils import load_config
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', required=False, type=str, default="/media/ymxlzgy/Data/Dataset/FRONT", help="dataset path")
 parser.add_argument('--with_CLIP', type=bool, default=True, help="Load Feats directly instead of points.")
@@ -135,62 +140,26 @@ def evaluate():
 
     argsJson = os.path.join(args.exp, 'args.json')
     assert os.path.exists(argsJson), 'Could not find args.json for experiment {}'.format(args.exp)
-    with open(argsJson) as j:
-        modelArgs = json.load(j)
-    normalized_file = os.path.join(args.dataset, 'centered_bounds_{}_trainval.txt').format(modelArgs['room_type'])
-    test_dataset_rels_changes = ThreedFrontDatasetSceneGraph(
-        root=args.dataset,
-        split='val_scans',
-        use_scene_rels=modelArgs['use_scene_rels'],
-        with_changes=True,
-        eval=True,
-        eval_type='relationship',
-        with_CLIP=modelArgs['with_CLIP'],
-        use_SDF=modelArgs['with_SDF'],
-        large=modelArgs['large'],
-        room_type=args.room_type,
-        recompute_clip=False)
+    
 
-    test_dataset_addition_changes = ThreedFrontDatasetSceneGraph(
-        root=args.dataset,
-        split='val_scans',
-        use_scene_rels=modelArgs['use_scene_rels'],
-        with_changes=True,
-        eval=True,
-        eval_type='addition',
-        with_CLIP=modelArgs['with_CLIP'],
-        use_SDF=modelArgs['with_SDF'],
-        large=modelArgs['large'],
-        room_type=args.room_type)
-
-    test_dataset_no_changes = ThreedFrontDatasetSceneGraph(
-        root=args.dataset,
-        split='val_scans',
-        use_scene_rels=modelArgs['use_scene_rels'],
-        with_changes=False,
-        eval=True,
-        eval_type='none',
-        with_CLIP=modelArgs['with_CLIP'],
-        use_SDF=modelArgs['with_SDF'],
-        large=modelArgs['large'],
-        room_type=args.room_type)
-
-    modeltype_ = modelArgs['network_type']
-    modelArgs['store_path'] = os.path.join(args.exp, "vis", args.epoch)
-    replacelatent_ = modelArgs['replace_latent'] if 'replace_latent' in modelArgs else None
-    with_changes_ = modelArgs['with_changes'] if 'with_changes' in modelArgs else None
+ 
+    test_dataset_no_changes=my_Dataset(args.dataset,args.with_feats,args.if_dug)
+    
+    config=load_config(args.config_file)
+   
     # args.visualize = False if args.gen_shape == False else args.visualize
 
     # instantiate the model
-    diff_opt = modelArgs['diff_yaml']
-    diff_cfg = OmegaConf.load(diff_opt)
-    diff_cfg.layout_branch.diffusion_kwargs.train_stats_file = test_dataset_no_changes.box_normalized_stats
-    diff_cfg.layout_branch.denoiser_kwargs.using_clip = modelArgs['with_CLIP']
-    model = SGDiff(type=modeltype_, diff_opt=diff_cfg, vocab=test_dataset_no_changes.vocab, replace_latent=replacelatent_,
-                with_changes=with_changes_, residual=modelArgs['residual'], gconv_pooling=modelArgs['pooling'], clip=modelArgs['with_CLIP'],
-                with_angles=modelArgs['with_angles'], separated=modelArgs['separated'])
-    model.diff.optimizer_ini()
-    model.load_networks(exp=args.exp, epoch=args.epoch, restart_optim=True, load_shape_branch=args.gen_shape)
+    
+    
+    model=DiffusionScene(config['network']).to(device=device)
+    
+    model.optimizer_ini()
+    model.load_state_dict(args.ckpt,strict=True)
+
+    #model.load_networks(exp=args.exp, epoch=args.epoch, restart_optim=True, load_shape_branch=args.gen_shape)
+    
+    
     if torch.cuda.is_available():
         model = model.cuda()
 
@@ -207,8 +176,9 @@ def evaluate():
 
     reseed(47)
     print('\nGeneration Mode')
-    validate_constrains_loop(modelArgs, test_dataset_no_changes, model, epoch=args.epoch, normalized_file=normalized_file, cat2objs=cat2objs, datasize='large' if modelArgs['large'] else 'small', gen_shape=args.gen_shape)
+    validate_constrains_loop(config, test_dataset_no_changes, model, epoch=args.epoch, normalized_file=normalized_file, cat2objs=cat2objs, datasize='large' if modelArgs['large'] else 'small', gen_shape=args.gen_shape)
 
 if __name__ == "__main__":
     print(torch.__version__)
+    device=torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
     evaluate()

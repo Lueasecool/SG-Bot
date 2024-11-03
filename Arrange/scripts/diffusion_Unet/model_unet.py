@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn import Module
 from torch.nn.utils import clip_grad_norm_
+import torch.optim as optim
 from diffusion_Unet.diffusion_point import DiffusionPoint
 from diffusion_Unet.denoise_net import Unet1D
 from diffusion_Unet.denoise_net_cross_attension import UNet1DModel
@@ -100,6 +101,14 @@ class DiffusionScene(Module):
         }
         
         return samples_dict
+    
+    def optimizer_ini(self):
+        gcn_layout_df_params = [p for p in self.parameters() if p.requires_grad == True]
+        shape_df_params = self.ShapeDiff.trainable_params
+        trainable_params = gcn_layout_df_params + shape_df_params
+        self.optimizerFULL = optim.AdamW(trainable_params, lr=1e-4)
+        self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizerFULL, lr_lambda=self.lr_lambda)
+        self.optimizers = [self.optimizerFULL]
             
     
 
