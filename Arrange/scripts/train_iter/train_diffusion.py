@@ -14,7 +14,7 @@ from datetime import datetime
 
 sys.path.append('.\Arrange')
 sys.path.append('.\Arrange\scripts')
-from traning_utils import load_config
+from Arrange.scripts.train_iter.utils import load_config
 
 from __init__ import optimizer_factory,schedule_factory,adjust_learning_rate
 
