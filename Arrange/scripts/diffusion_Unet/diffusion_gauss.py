@@ -35,7 +35,7 @@ class GaussianDiffusion:
         self.class_dim = config.get("class_dim", 21)
         self.translation_dim = config.get("translation_dim", 3)
         self.size_dim = config.get("size_dim", 3)
-        self.angle_dim = config.get("angle_dim", 1)
+        self.angle_dim = config.get("angle_dim", 4)
         self.bbox_dim = self.translation_dim + self.size_dim + self.angle_dim
         self.objfeat_dim = config.get("objfeat_dim", 0)
         self.loss_separate = loss_separate
@@ -307,14 +307,14 @@ class GaussianDiffusion:
         """
         #B, D, N = data_start.shape
         # make it compatible for 1D 
-        if len(data_start.shape) == 3:
-            B, D, N = data_start.shape
-        elif len(data_start.shape) == 4:
-            B, D, M, N = data_start.shape
+        # if len(data_start.shape) == 3:
+        #     B, D, N = data_start.shape
+        # elif len(data_start.shape) == 4:
+        #     B, D, M, N = data_start.shape
+        # assert t.shape == torch.Size([B])
+        B, D = data_start.shape
         assert t.shape == torch.Size([B])
-
-        if noise is None:
-            noise = torch.randn(data_start.shape, dtype=data_start.dtype, device=data_start.device)
+        noise = torch.randn(data_start.shape, dtype=data_start.dtype, device=data_start.device)
         assert noise.shape == data_start.shape and noise.dtype == data_start.dtype
 
         data_t = self.q_sample(x_start=data_start, t=t, noise=noise)#在第t步扩散后的数据
@@ -333,6 +333,7 @@ class GaussianDiffusion:
             #denoise_out = denoise_fn(data_t, t, condition, condition_cross)#经过u-Net输出的预测噪声
             denoise_out = denoise_fn(data_t, obj_embed, triples, t, condition_cross)
             assert data_t.shape == data_start.shape
+           # print("denoise_out'shape:",denoise_out.shape)
         loss_size = ((target[:, 0:self.size_dim] - denoise_out[:, 0:self.size_dim]) ** 2).mean(
             dim=list(range(1, len(data_t.shape))))
         loss_trans = ((target[:, self.size_dim:self.size_dim + self.translation_dim] - denoise_out[:,
@@ -340,19 +341,19 @@ class GaussianDiffusion:
             dim=list(range(1, len(data_t.shape))))
         loss_angle = ((target[:, self.size_dim + self.translation_dim:self.bbox_dim] - denoise_out[:,
                                                                                        self.size_dim + self.translation_dim:self.bbox_dim]) ** 2).mean(
-            dim=list(range(1, len(data_t.shape))))
-        loss_bbox = ((target[:, 0:self.bbox_dim] - denoise_out[:, 0:self.bbox_dim]) ** 2).mean(
-            dim=list(range(1, len(data_t.shape))))
+             dim=list(range(1, len(data_t.shape))))
+        # loss_bbox = ((target[:, 0:self.bbox_dim] - denoise_out[:, 0:self.bbox_dim]) ** 2).mean(
+        #     dim=list(range(1, len(data_t.shape))))
         losses = ((target - denoise_out) ** 2).mean(dim=list(range(1, len(data_t.shape))))
 
             
 
             
-        return losses, {
-            'loss.bbox': loss_bbox.mean(),
+        return losses.mean(), {
+            # 'loss.bbox': loss_bbox.mean(),
             'loss.trans': loss_trans.mean(),
             'loss.size': loss_size.mean(),
-            'loss.angle': loss_angle.mean(),
+         'loss.angle': loss_angle.mean()
         }
            
                    

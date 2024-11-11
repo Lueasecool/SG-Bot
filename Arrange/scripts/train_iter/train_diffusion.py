@@ -12,13 +12,13 @@ from torch.utils.data import DataLoader
 import time
 from datetime import datetime
 
-sys.path.append('.\Arrange')
-sys.path.append('.\Arrange\scripts')
-from Arrange.scripts.train_iter.utils import load_config
+sys.path.append('./Arrange')
+sys.path.append('./Arrange/scripts')
+from scripts.train_iter.utils import load_config
 
 from __init__ import optimizer_factory,schedule_factory,adjust_learning_rate
 
-from diffusion_Unet.model_unet import train_on_batch
+from scripts.diffusion_Unet.model_unet import train_on_batch
 from diffusion_Unet.stat_logger import StatsLogger
 from data_util.data_read import my_Dataset
 from scripts.diffusion_Unet.model_unet import DiffusionScene
@@ -44,13 +44,14 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(np.random.randint(np.iinfo(np.int32).max))
 
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-    else:
-        device = torch.device("cpu")
+    # if torch.cuda.is_available():
+    #     device = torch.device("cuda:0")
+    # else:
+    #     device = torch.device("cpu")
+    device = torch.device("cpu")
     print("Running code on", device)
 
-
+      
     config=load_config(args.config_file)
 
     train_dataset=my_Dataset(config['root'].get('path'),None,None)

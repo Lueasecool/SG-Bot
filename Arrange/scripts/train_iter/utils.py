@@ -13,98 +13,87 @@ def load_config(config_file):
         config = yaml.load(f, Loader=Loader)
     return config
 
-def render_box(scene_id, cats, predBoxes, predAngles, datasize='small', classes=None, render_type='txt2shape',
-               render_shapes=True, store_img=False, render_boxes=False, demo=False, visual=False, without_lamp=False,
+def render_box(obj_ids, predBoxes, predAngles, render_type='onlybox',
+               store_img=False, render_boxes=False, demo=False, visual=False, without_lamp=False,
                str_append="", mani=0, missing_nodes=None, manipulated_nodes=None, objs_before=None, store_path=None):
     os.makedirs(store_path,exist_ok=True)
     if render_type not in ['txt2shape', 'retrieval', 'onlybox']:
         raise ValueError('Render type needs to be either set to txt2shape or retrieval or onlybox.')
-    color_palette = np.array(sns.color_palette('hls', len(classes)))
+    color_palette = np.array(sns.color_palette('hls', 100))
+
+
     box_and_angle = torch.cat([predBoxes.float(), predAngles.float()], dim=-1)
 
     obj_n = len(box_and_angle)
-    if mani == 2:
-        if len(missing_nodes) > 0:
-            box_and_angle = box_and_angle[missing_nodes]
-        elif len(manipulated_nodes) > 0:
-            box_and_angle = box_and_angle[sorted(manipulated_nodes)]
 
-    mesh_dir = os.path.join(store_path, render_type, 'object_meshes', scene_id[0])
-    os.makedirs(mesh_dir, exist_ok=True)
+    # mesh_dir = os.path.join(store_path, render_type, 'object_meshes', "hello")
+    # os.makedirs(mesh_dir, exist_ok=True)
     
     if render_type == 'onlybox':
-        lamp_mesh_list, trimesh_meshes = get_bbox(box_and_angle, cats, classes, colors=color_palette[cats], without_lamp=without_lamp)
+        lamp_mesh_list, trimesh_meshes = get_bbox(box_and_angle,obj_ids, colors=color_palette[obj_ids])
     else:
         raise NotImplementedError
 
-    if mani == 2:
-        print("manipulated nodes: ", len(manipulated_nodes), len(trimesh_meshes))
-        if len(missing_nodes) > 0:
-            trimesh_meshes += objs_before
-            query_label = classes[cats[0]].strip('\n')
-            str_append += "_" + query_label
-        elif len(manipulated_nodes) > 0:
-            i, j, k = 0, 0, 0
-            for i in range(obj_n):
-                query_label = classes[cats[i]].strip('\n')
-                i += 1
-                if query_label == '_scene_' or query_label == 'floor' or (query_label == 'lamp' and without_lamp):
-                    continue
-                if i in manipulated_nodes:
-                    objs_before[j] = trimesh_meshes[k]
-                    str_append += "_" + query_label
-                    #all_meshes.append(trimesh_meshes[j])
-                    k += 1
-                j += 1
-            trimesh_meshes = objs_before
 
-    if demo:
-        mesh_dir_shifted = mesh_dir.replace('object_meshes', 'object_meshes_shifted')
-        os.makedirs(mesh_dir_shifted, exist_ok=True)
-        trimesh_meshes += lamp_mesh_list
-        for i, mesh in enumerate(trimesh_meshes):
-            mesh.export(os.path.join(mesh_dir_shifted,  f"{i}.obj"))
+
     scene = trimesh.Scene(trimesh_meshes)
     scene_path = os.path.join(store_path, render_type)
     if len(str_append) > 0:
         render_type += str_append
     os.makedirs(scene_path, exist_ok=True)
-    scene.export(os.path.join(scene_path, "{0}_{1}.glb".format(scene_id[0], render_type)))
+    scene.export(os.path.join(scene_path, "{0}_{1}.glb".format('hello', render_type)))
 
-    if visual:
-        scene.show()
+    
+    # scene.show()
 
-    if store_img and not demo:
-        img_path = os.path.join(store_path, render_type, "render_imgs")
-        os.makedirs(img_path, exist_ok=True)
-        color_img = render_img(trimesh_meshes)
-        color_bgr = cv2.cvtColor(color_img, cv2.COLOR_RGBA2BGR)
-        file_name = scene_id[0]
-        if len(str_append) > 0:
+
+    img_path = os.path.join(store_path, render_type, "render_imgs")
+    os.makedirs(img_path, exist_ok=True)
+    color_img = render_img(trimesh_meshes)
+    color_bgr = cv2.cvtColor(color_img, cv2.COLOR_RGBA2BGR)
+    file_name = "hello"
+    if len(str_append) > 0:
             file_name += str_append
-        cv2.imwrite(os.path.join(img_path, f'{file_name}.png'), color_bgr)
-
+    cv2.imwrite(os.path.join('/remote-home/2332082/ArrangeBot/Arrange/scripts/train_iter', f'{file_name}.png'), color_bgr)
+    print("已生成图片")
     if mani==1:
         return trimesh_meshes
 
 
 
 
-def get_bbox(boxes, cat_ids, classes, colors, without_lamp=False):
+def get_bbox(boxes,obj_ids, colors):
     trimesh_meshes = []
     colors = iter(colors)
     lamp_mesh_list=[]
+    print(boxes)
+    print(boxes.shape)
+    classes=['_scene_',
+    'bowl',
+    'box',
+    'can',
+    'cup',
+    'fork',
+    'knife',
+    'pitcher',
+    'plate',
+    'support_table',
+    'tablespoon',
+    'teapot',
+    'teaspoon',
+    'obstacle']
     for j in range(0, boxes.shape[0]):
-        query_label = classes[cat_ids[j]].strip('\n')
-        if query_label == '_scene_' or query_label == 'floor':
+        query_label = classes[obj_ids[j]-1].strip('\n')
+        print("rendering", classes[obj_ids[j]].strip('\n') )
+        if query_label == '_scene_' or query_label == 'support_table':
             continue
         box_points = params_to_8points_3dfront(boxes[j], degrees=True)
+        print('box_points',box_points)
         trimesh_meshes.append(create_bbox_marker(box_points, tube_radius=0.02, color=next(colors)))
         # if query_label == 'nightstand':
         #     trimesh_meshes.pop()
-        if query_label == 'lamp' and without_lamp:
-            lamp_mesh_list.append(trimesh_meshes.pop())
-
+        
+    
 
     return lamp_mesh_list, trimesh_meshes
 

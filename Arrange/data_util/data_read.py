@@ -114,31 +114,86 @@ class my_Dataset(data.Dataset):
     
 
     def convert_tensor(self,datum):
+        
         tensors={
-            "class_ids": torch.LongTensor(np.array(datum["class_ids"])),
-            "bbox_es": torch.FloatTensor(np.array(datum["bbox_es"])),
-            "locations": torch.FloatTensor(np.array(datum["locations"])),
-            "quaternion_xyzw":torch.FloatTensor(np.array(datum['quaternion_xyzw'])),
-            "triples":torch.FloatTensor(np.array(datum['triples']))
+            # "class_ids": torch.LongTensor(np.array(datum["class_ids"])),
+            # "bbox_es": torch.FloatTensor(np.array(datum["bbox_es"])),
+            # "locations": torch.FloatTensor(np.array(datum["locations"])),
+            # "quaternion_xyzw":torch.FloatTensor(np.array(datum['quaternion_xyzw'])),
+            # "triples":torch.FloatTensor(np.array(datum['triples']))
+
+            "class_ids": torch.from_numpy(np.array(datum["class_ids"],dtype=np.int64)),
+            "bbox_es": torch.from_numpy(np.array(datum["bbox_es"],dtype=np.float32)),
+            "locations": torch.from_numpy(np.array(datum["locations"],dtype=np.float32)),
+            "quaternion_xyzw":torch.from_numpy(np.array(datum['quaternion_xyzw'],dtype=np.float32)),
+            "triples":torch.from_numpy(np.array(datum['triples'],dtype=np.int64))
          }
         return tensors
     
-    
+    def quaternion_to_sin_cos(self,qw):
+        """
+    将四元数转换为正弦和余弦值。
+    参数:
+    q -- 四元数，格式为 (w, x, y, z)
+    返回:
+    sin_theta -- 正弦值
+    cos_theta -- 余弦值
+         """
+        w=qw[0]
+    # 计算旋转角度
+        theta = torch.tensor(2 * np.arccos(w))  # 计算旋转角度 (弧度)
+    # 计算正弦和余弦值
+        sin_theta = torch.sin(theta / 2)
+        cos_theta = torch.cos(theta / 2)
+        angles = torch.stack([sin_theta, cos_theta]).unsqueeze(0) 
+        return angles
+
     def collate_fn(self,batch):
     # 这里的 batch 是从 DataLoader 中获取的一批样本
-        return {
-        "class_ids": rnn_utils.pad_sequence([item['class_ids'] for item in batch], batch_first=True),
-        "bbox_es": rnn_utils.pad_sequence([item['bbox_es'] for item in batch], batch_first=True),
-        "locations": rnn_utils.pad_sequence([item['locations'] for item in batch], batch_first=True),
-        "quaternion_xyzw": rnn_utils.pad_sequence([item['quaternion_xyzw'] for item in batch], batch_first=True),
-        "triples":rnn_utils.pad_sequence([item['triples'] for item in batch],batch_first=True)
-        }
+        
+        # "class_ids": rnn_utils.pad_sequence([item['class_ids'] for item in batch], batch_first=True),
+        # "bbox_es": rnn_utils.pad_sequence([item['bbox_es'] for item in batch], batch_first=True),
+        # "locations": rnn_utils.pad_sequence([item['locations'] for item in batch], batch_first=True),
+        # "quaternion_xyzw": rnn_utils.pad_sequence([item['quaternion_xyzw'] for item in batch], batch_first=True),
+        # "triples":rnn_utils.pad_sequence([item['triples'] for item in batch],batch_first=True)
+        
+        all_objs, all_boxes, all_triples = [], [], []
+        all_locations,all_angles=[],[]
+        for i in range(len(batch)):
+            (objs, triples, boxes) = batch[i]['class_ids'], batch[i]['triples'], batch[i]['bbox_es']
+            locations,quaternion_xyzw= batch[i]["locations"],batch[i]["quaternion_xyzw"]
+            #angles=self.quaternion_to_sin_cos(quaternion_xyzw)
+            all_triples.append(triples)
+            all_objs.append(objs)
+            all_boxes.append(boxes)
+            all_angles.append(quaternion_xyzw)
+            all_locations.append(locations)
+        all_objs = torch.cat(all_objs)
+        all_boxes=torch.cat(all_boxes)
+        all_triples=torch.cat(all_triples)
+        all_locations=torch.cat(all_locations)
+        # 将列表转换为张量
+       
+        all_angles=torch.cat(all_angles)
+
+        return {"class_ids":all_objs, 
+                "triples":all_triples,
+                "bbox_es":all_boxes,
+                "locations":all_locations,
+                "quaternion_xyzw":all_angles
+                }
+        
+        
+        
+        
+        
+        
         
 if __name__=="__main__":
     root="/remote-home/2332082/data/sgbot_dataset/raw/7b4acb843fd4b0b335836c728d324152"
     root2="D:\\pythonhomework\\Project_Repetition\\SG-Bot\\sgbot_dataset\\7b4acb843fd4b0b335836c728d324152"
     #print(os.listdir(root))
-    my_data=my_Dataset(root2,None,None)
+    my_data=my_Dataset(root,None,None)
     files=my_data.get_goal_files()
     # for i in files:
     #     print(i)
@@ -150,4 +205,6 @@ if __name__=="__main__":
     # 输出一个批次的数据
     for batch in data_loader:
         print(batch)
+        print(batch['bbox_es'].shape)
+        print(batch['angles'].shape)
         break  # 只输出一个批次的数据

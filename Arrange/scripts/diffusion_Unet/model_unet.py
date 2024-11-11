@@ -1,13 +1,14 @@
 
 import sys
-sys.path.append('.\Arrange')
-sys.path.append('.\Arrange\scripts')
+sys.path.append('.')
+sys.path.append('./scripts')
+sys.path.append('./scripts/diffusion_Unet')
 import torch
 import torch.nn as nn
 from torch.nn import Module
 from torch.nn.utils import clip_grad_norm_
 import torch.optim as optim
-from diffusion_Unet.diffusion_point import DiffusionPoint
+from Arrange.scripts.diffusion_Unet.diffusion_point import DiffusionPoint
 from diffusion_Unet.denoise_net import Unet1D
 from diffusion_Unet.denoise_net_cross_attension import UNet1DModel
 from diffusion_Unet.stat_logger import StatsLogger
@@ -17,13 +18,16 @@ class DiffusionScene(Module):
     def __init__(self, config,embedding_dim=128,gconv_pooling='avg', gconv_num_layers=5):
         super().__init__()
         self.text_condition=config.get("text_condition",False)
-        self.diffusion=DiffusionPoint(denoise_net = UNet1DModel(**config[" denoiser_kwargs"]),
+        self.diffusion=DiffusionPoint(denoise_net = UNet1DModel(**config["denoiser_kwargs"]),
             config = config,**config["diffusion_kwargs"]
             )   
-        self.obj_embeddings_ec = nn.Embedding(num_objs + 1, gconv_dim * 2)#num_objs 是改场景下物体个数
+        num_objs=14
+        num_preds=16
+        gconv_dim = embedding_dim
+        self.obj_embeddings_ec = nn.Embedding(num_objs + 1, gconv_dim * 2)#num_objs 是该场景下物体个数
         self.pred_embeddings_ec = nn.Embedding(num_preds, gconv_dim * 2)#num_pres是物体关系总数
         self.config=config
-        gconv_dim = embedding_dim
+        
         gconv_hidden_dim = gconv_dim * 4
         gconv_kwargs_ec = {
             'input_dim_obj': gconv_dim * 2 ,
@@ -35,20 +39,25 @@ class DiffusionScene(Module):
             'residual': False,
             'output_dim': gconv_dim * 2
         }
-        self.gcn_conv_enc=GraphTripleConvNet(**gconv_kwargs_ec)
+        self.gconv_net_enc=GraphTripleConvNet(**gconv_kwargs_ec)
 
-    def encoder(self,datum):
-        objs=datum["calss_ids"]
-        triples=datum["triples"]
-        bbox_es=datum['bbox-es']
+    def encoder(self,objs,triples):
+        # objs=datum["class_ids"]
+        # triples=datum["triples"]
+        # print(triples.shape)
+        # bbox_es=datum['bbox_es']
         O, T = objs.size(0), triples.size(0)
         s, p, o = triples.chunk(3, dim=1)  # All have shape (T, 1)
+        
         s, p, o = [x.squeeze(1) for x in [s, p, o]]  # Now have shape (T,)
+        #print(T)
         edges = torch.stack([s, o], dim=1)  # Shape is (T, 2)
-
+        #print(edges)
         obj_embed = self.obj_embeddings_ec(objs)
+        #print("obj_embding:",obj_embed.shape)
         pred_embed = self.pred_embeddings_ec(p)
-        latent_obj_f, latent_pred_f = self.gconv_net_ec(obj_embed, pred_embed, edges)
+        
+        latent_obj_f, latent_pred_f = self.gconv_net_enc(obj_embed, pred_embed, edges)
 
         return obj_embed, pred_embed, latent_obj_f, latent_pred_f #obj_embed,latent_obj_f
 
@@ -65,10 +74,9 @@ class DiffusionScene(Module):
         # print("bbox_es:", bbox_es.shape)
         # print("locations:", locations.shape)  # 这里可能会输出一个元组
         # print("quaternion_xyzw:", quaternion_xyzw.shape)
-        layout_info=torch.cat([class_ids_expanded,bbox_es,locations,quaternion_xyzw],dim=-1).contiguous()
-        
+        layout_info=torch.cat([bbox_es,quaternion_xyzw],dim=-1).contiguous()
         obj_embed,_,latent_obj_f,_=self.encoder(datum)
-        self.loss = self.diffusion.get_loss_iter_v2(obj_embed=obj_embed, obj_triples=triples, target_box=bbox_es, rel=latent_obj_f)
+        self.loss = self.diffusion.get_loss_iter_v2(obj_embed=obj_embed, preds=triples, data=layout_info, condition_cross=latent_obj_f)
         return self.loss
         
         # loss,loss_dict=self.diffusion.get_loss_iter(
@@ -76,28 +84,23 @@ class DiffusionScene(Module):
         
         # return loss,loss_dict
    
-    def sample(self, box_dim, batch_size, obj_embed=None, obj_triples=None, text=None, rel=None, ret_traj=False, ddim=False, clip_denoised=False, freq=40, batch_seeds=None):
-
+    def sample(self, box_dim, batch_size, objs=None, triples=None, clip_denoised=False):
+        obj_embed,_,latent_obj_f,_=self.encoder(objs,triples)
         noise_shape = (batch_size, box_dim)
-        condition = rel if self.rel_condition else None
+        condition = latent_obj_f
         condition_cross = None
         # reverse sampling
-        samples = self.df.gen_samples_sg(noise_shape, obj_embed.device, obj_embed, obj_triples, condition=condition, clip_denoised=clip_denoised)
+        samples = self.diffusion.gen_samples_sg(noise_shape, obj_embed.device, obj_embed, triples, condition=condition, clip_denoised=clip_denoised)
         
         return samples
 
     @torch.no_grad()
-    def generate_layout_sg(self, box_dim, text=None, ret_traj=False, ddim=False, clip_denoised=False, batch_seeds=None):
-
-        rel = self.rel
-        obj_embed = self.uc_rel
-        triples = self.preds
-
-        samples = self.sample(box_dim, batch_size=len(obj_embed), obj_embed=obj_embed, obj_triples=triples, text=text, rel=rel, ret_traj=ret_traj, ddim=ddim, clip_denoised=clip_denoised, batch_seeds=batch_seeds)
+    def generate_layout_sg(self, box_dim, objs,triples,clip_denoised=False):
+        samples = self.sample(box_dim, batch_size=len(objs), objs=objs, triples=triples, clip_denoised=clip_denoised)
         samples_dict = {
-            "sizes": samples[:, 0:self.size_dim].contiguous(),
-            "translations": samples[:, self.size_dim:self.size_dim + self.translation_dim].contiguous(),
-            "angles": samples[:, self.size_dim + self.translation_dim:self.bbox_dim].contiguous(),
+            "sizes": samples[:, 0:3].contiguous(),
+            "translations": samples[:, 3:6].contiguous(),
+            "angles": samples[:, 6:10].contiguous(),
         }
         
         return samples_dict
@@ -120,6 +123,7 @@ def train_on_batch(model, optimizer, sample_params, config):
     for k, v in loss_dict.items():
         StatsLogger.instance()[k].value = v.item()#遍历损失字典，记录每个损失项的值
     # Do the backpropagation
+    print("loss:",loss.shape)
     loss.backward()
     # Compuite model norm
     grad_norm = clip_grad_norm_(model.parameters(), config["training"]["max_grad_norm"])#梯度裁剪
@@ -137,4 +141,8 @@ def validate_on_batch(model, sample_params, config):
     for k, v in loss_dict.items():
         StatsLogger.instance()[k].value = v.item()
     return loss.item()
+
+
+
+
 

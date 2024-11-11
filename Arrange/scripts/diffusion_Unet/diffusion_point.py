@@ -91,14 +91,31 @@ class DiffusionPoint(nn.Module):
         }
 
 
-    def _denoise(self, data, t, condition, condition_cross):
-        B, D,N= data.shape
+    def _denoise(self,data, obj_embed, triples, t, condition_cross):
+        # B, D,N= data.shape
+        # assert data.dtype == torch.float
+        # assert t.shape == torch.Size([B]) and t.dtype == torch.int64
+
+        # out = self.model(data, t, condition, condition_cross)#由data输入1d-Unet后的预测的噪声，与data形状一致
+        
+        # assert out.shape == torch.Size([B, D, N])
+        # return out
+    
+        B, D = data.shape
         assert data.dtype == torch.float
         assert t.shape == torch.Size([B]) and t.dtype == torch.int64
+        # data = data.unsqueeze(1)
+        if self.model.conditioning_key == 'concat':
+            out = self.model(data, obj_embed, triples, t)
+        elif self.model.conditioning_key == 'crossattn':
+            out = self.model(data, obj_embed, triples, t, context=condition_cross)
+        else:
+            raise NotImplementedError
+        # elif self.model.conditioning_key == 'hybrid':
+        #     out = self.model(data, condition, t, context=condition_cross)
+        out = out.squeeze(-1)
 
-        out = self.model(data, t, condition, condition_cross)#由data输入1d-Unet后的预测的噪声，与data形状一致
-        
-        assert out.shape == torch.Size([B, D, N])
+       # assert out.shape == torch.Size([B, D])
         return out
 
     def get_loss_iter(self, data, noises=None, condition=None, condition_cross=None):

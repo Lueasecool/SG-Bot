@@ -1,9 +1,9 @@
 ### adapted from: https://github.com/CompVis/latent-diffusion/blob/main/ldm/modules/diffusionmodules/openaimodel.py
 import sys
 
-sys.path.append('.\Arrange')
-sys.path.append('.\Arrange\scripts')
-sys.path.append('.\Arrange\scripts\diffusion_Unet')
+sys.path.append('./Arrange')
+sys.path.append('./Arrange/scripts')
+sys.path.append('./Arrange/scripts/diffusion_Unet')
 from abc import abstractmethod
 from functools import partial
 import math
@@ -505,7 +505,7 @@ class UNet1DModel(nn.Module):
         concat_dim=None,                 # custom transformer support
         crossattn_dim=None,  # custom transformer support
         conditioning_key='crossattn',
-        using_clip=True,
+        using_clip=False,
         enable_t_emb=False
     ):
         super().__init__()
@@ -718,17 +718,20 @@ class UNet1DModel(nn.Module):
         )
 
         # GCN part
-        gconv_dim = 64
+        gconv_dim = 128
         gconv_hidden_dim = gconv_dim * 4
         add_dim = 0
         if self.using_clip:
             add_dim = 512
-        self.pred_embeddings = nn.Embedding(16, gconv_dim * 2)
-        self.box_embeddings = nn.Linear(in_channels, gconv_dim)
+        #self.pred_embeddings = nn.Embedding(16, gconv_dim * 2)
+        self.pred_embeddings = nn.Embedding(16, 64 * 2)
+        #self.box_embeddings = nn.Linear(in_channels, gconv_dim)
+        #self.box_embeddings = nn.Linear(6, gconv_dim)
+        self.box_embeddings = nn.Linear(10, 64)
         self.box_embeddings.apply(_init_weights)
         gconv_kwargs_box = {
-            'input_dim_obj': gconv_dim * 2 + add_dim + gconv_dim,
-            'input_dim_pred': gconv_dim * 2,
+            'input_dim_obj': gconv_dim * 2,#256+64
+            'input_dim_pred': gconv_dim * 2,#256
             'hidden_dim': gconv_hidden_dim,
             'pooling': 'avg',
             'num_layers': 5,
@@ -763,10 +766,15 @@ class UNet1DModel(nn.Module):
         s, p, o = triples.chunk(3, dim=1)  # All have shape (T, 1)
         s, p, o = [i.squeeze(1) for i in [s, p, o]]  # Now have shape (T,)
         edges = torch.stack([s, o], dim=1)  # Shape is (T, 2)
-
+        
+       # print("obj_embed:",obj_embed.shape)#256
         box_embed = self.box_embeddings(box_t)
         pred_embed = self.pred_embeddings(p)
+        
+       # print("shape of box",box_embed.shape)
         obj_box_embed = torch.cat([obj_embed, box_embed], dim=1)
+       # print("shape of obj_box",obj_box_embed.shape)
+       # print("pred_embed shape",pred_embed.shape)
         if enable_t_emb:
             assert t_emb is not None
             t_emb = self.box_time_emb(t_emb)

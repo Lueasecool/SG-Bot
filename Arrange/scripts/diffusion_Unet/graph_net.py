@@ -92,6 +92,7 @@ class GraphTripleConv(nn.Module):
             output_dim = input_dim_obj
         self.input_dim_obj = input_dim_obj
         self.input_dim_pred = input_dim_pred
+        
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
 
@@ -101,8 +102,10 @@ class GraphTripleConv(nn.Module):
 
         self.pooling = pooling
         net1_layers = [2 * input_dim_obj + input_dim_pred, hidden_dim, 2 * hidden_dim + input_dim_pred]
+        #net1_layers = [ 768, hidden_dim, 2 * hidden_dim + input_dim_pred]
         net1_layers = [l for l in net1_layers if l is not None]
         self.net1 = build_mlp(net1_layers, batch_norm=mlp_normalization)
+       
         self.net1.apply(_init_weights)
 
         net2_layers = [hidden_dim, hidden_dim, output_dim]
@@ -110,6 +113,7 @@ class GraphTripleConv(nn.Module):
         self.net2.apply(_init_weights)
 
         if self.residual:
+           # print("output_dim:",output_dim)
             self.linear_projection = nn.Linear(input_dim_obj, output_dim)
             self.linear_projection_pred = nn.Linear(input_dim_pred, input_dim_pred) # TODO is there any better option?
 
@@ -132,11 +136,11 @@ class GraphTripleConv(nn.Module):
         dtype, device = obj_vecs.dtype, obj_vecs.device
         num_objs, num_triples = obj_vecs.size(0), pred_vecs.size(0)
         Din_obj, Din_pred, H, Dout = self.input_dim_obj, self.input_dim_pred, self.hidden_dim, self.output_dim
-
+        
         # Break apart indices for subjects and objects; these have shape (num_triples,)
         s_idx = edges[:, 0].contiguous()
         o_idx = edges[:, 1].contiguous()
-
+        
         # Get current vectors for subjects and objects; these have shape (num_triples, Din)
         cur_s_vecs = obj_vecs[s_idx]
         cur_o_vecs = obj_vecs[o_idx]
@@ -144,7 +148,9 @@ class GraphTripleConv(nn.Module):
         # Get current vectors for triples; shape is (num_triples, 3 * Din)
         # Pass through net1 to get new triple vecs; shape is (num_triples, 2 * H + Dout)
         cur_t_vecs = torch.cat([cur_s_vecs, pred_vecs, cur_o_vecs], dim=1)
+       
         new_t_vecs = self.net1(cur_t_vecs)
+       
 
         # Break apart into new s, p, and o vecs; s and o vecs have shape (num_triples, H) and
         # p vecs have shape (num_triples, Dout)
@@ -197,11 +203,12 @@ class GraphTripleConv(nn.Module):
         # of shape (num_objs, Dout)
         new_obj_vecs = self.net2(pooled_obj_vecs)
 
-        if self.residual:
-            projected_obj_vecs = self.linear_projection(obj_vecs)
-            new_obj_vecs = new_obj_vecs + projected_obj_vecs
-            # new
-            new_p_vecs = new_p_vecs + self.linear_projection_pred(pred_vecs)
+        # if self.residual:
+           
+        #     projected_obj_vecs = self.linear_projection(obj_vecs)
+        #     new_obj_vecs = new_obj_vecs + projected_obj_vecs
+        #     # new
+        #     new_p_vecs = new_p_vecs + self.linear_projection_pred(pred_vecs)
 
         return new_obj_vecs, new_p_vecs
 

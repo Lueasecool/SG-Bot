@@ -18,13 +18,13 @@ network:
     type: "diffusion_scene_layout_ddpm"
     # denoising network
     net_type: "unet1d"
-
+    translation_dim: 3
     # concate squarewish layer
     point_dim: 62
     latent_dim: 0
     room_mask_condition: false # not use room_mask 
     sample_num_points: 12 # max_length 
-    size_dim: 0
+    size_dim: 3
     objectness_dim: 1
     class_dim: 6
     angle_dim: 4
@@ -70,8 +70,8 @@ network:
 
     denoiser_kwargs:
         dims: 1 # 1D
-        in_channels: 8 # size(3)+loc(3)+sincos(2)
-        out_channels: 8 # same
+        in_channels: 10 # 8size(3)+loc(3)+qw(4)
+        out_channels: 10 # same
         model_channels: 512
         channel_mult: [ 1,1,1,1]
         num_res_blocks: 2
@@ -93,9 +93,9 @@ feature_extractor:
 
 training:
     splits: ["train", "val"]
-    epochs: 10000
+    epochs: 1000
     steps_per_epoch: 500
-    batch_size: 32
+    batch_size: 64
     save_frequency: 100
     max_grad_norm: 10
     # optimizer
@@ -119,4 +119,7 @@ validation:
 logger:
     type: "wandb"
     project: "diffuscene"
- 
+
+
+eval:
+    store_path: "/remote-home/2332082/data/sgbot_dataset/eval"

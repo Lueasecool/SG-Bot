@@ -138,3 +138,5 @@ AtlasNet2/partial_pc_data/
 graphto3d/experiments/
 sg_bot_robot_results/
 sg_bot_oracle_results/
+DDPM_7/
+DDPM_10/
