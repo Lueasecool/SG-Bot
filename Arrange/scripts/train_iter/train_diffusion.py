@@ -8,7 +8,9 @@ import numpy as np
 import torch.nn as nn
 import torch
 from torch.utils.data import DataLoader
-
+import onnx
+import onnx.utils
+import onnx.version_converter
 import time
 from datetime import datetime
 
@@ -20,15 +22,15 @@ from __init__ import optimizer_factory,schedule_factory,adjust_learning_rate
 
 from scripts.diffusion_Unet.model_unet import train_on_batch
 from diffusion_Unet.stat_logger import StatsLogger
-from data_util.data_read import my_Dataset
+from data_util.data_readfull import my_Dataset
 from scripts.diffusion_Unet.model_unet import DiffusionScene
 from diffusion_Unet.denoise_net import Unet1D
 from diffusion_Unet.diffusion_gauss import GaussianDiffusion
 from diffusion_Unet.diffusion_point import DiffusionPoint
 def main(args):
-    now=datetime.now()
+    
     now = datetime.now()
-    folder_name = f"DDPM_{now.hour}"
+    folder_name = f"Arrange_{now.hour}-{now.min}"
 
 # 创建文件夹
     os.makedirs(folder_name, exist_ok=True)
@@ -44,18 +46,18 @@ def main(args):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(np.random.randint(np.iinfo(np.int32).max))
 
-    # if torch.cuda.is_available():
-    #     device = torch.device("cuda:0")
-    # else:
-    #     device = torch.device("cpu")
-    device = torch.device("cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+    else:
+        device = torch.device("cpu")
+    # device = torch.device("cpu")
     print("Running code on", device)
 
       
     config=load_config(args.config_file)
 
-    train_dataset=my_Dataset(config['root'].get('path'),None,None)
-    train_dataset.get_goal_files()
+    train_dataset=my_Dataset(config['root'].get('raw'),config['root'].get('file_path'),None,None)
+    
 
     train_loader = DataLoader(
         train_dataset,
@@ -66,24 +68,22 @@ def main(args):
     )
   
     network=DiffusionScene(config['network']).to(device=device)
-    #network = nn.Linear(10, 5)
-
-    # for param in network.parameters():
-    #     print(param.shape)
+    
 
     
     
     optimizer = optimizer_factory(config["training"],
                                    filter(lambda p: p.requires_grad, network.parameters()) )
     lr_scheduler = schedule_factory(config["training"])
-    num_epochs=config["training"].get("epochs", 150)
+    num_epochs=config["training"].get("epochs", 5000)
     best_loss=100
     
     for epoch in tqdm(range(num_epochs),desc=f"Training progress",colour="#00ff00"):
         # adjust learning rate
         adjust_learning_rate(lr_scheduler, optimizer, epoch)
         epoch_loss=0.0
-        log_string = f"Loss at epoch {epoch + 1}: {epoch_loss:.3f}"
+        log_string = f"Loss at epoch {epoch + 1}: {best_loss:.3f}"
+        
         network.train()
         #for b, sample in zip(range(steps_per_epoch), yield_forever(train_loader)):
         for b, sample in enumerate(tqdm(train_loader, leave=False, desc=f"Epoch {epoch + 1}/{num_epochs}",colour="#005500")):
@@ -96,10 +96,12 @@ def main(args):
             StatsLogger.instance().print_progress(epoch+1, b+1, batch_loss)
             
             epoch_loss += batch_loss
-        if best_loss > epoch_loss:
+        if epoch%100==0:
+            if best_loss > epoch_loss :
                 best_loss = epoch_loss
-                torch.save(network.state_dict(), os.path.join(folder_name,"my_ddpm_model.pt"))
+                torch.save(network.state_dict(), os.path.join(folder_name,f"my_ddpm_model-{best_loss:.4f}.pt"))
                 log_string += " --> Best model ever (stored)"
+                print(log_string)
         StatsLogger.instance().clear()
 
        

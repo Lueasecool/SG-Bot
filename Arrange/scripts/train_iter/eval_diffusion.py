@@ -42,7 +42,7 @@ parser.add_argument(
 parser.add_argument(
         "--ckpt",
         help="Path to the file that contains the experiment configuration",
-        default="/remote-home/2332082/ArrangeBot/DDPM_10/my_ddpm_model.pt"
+        default="/remote-home/2332082/ArrangeBot/Arrange_15-0001-01-01 00:00:00/my_ddpm_model-0.1924.pt"
     )
 
 args = parser.parse_args()
@@ -94,7 +94,7 @@ def validate_constrains_loop(img_path, test_dataset, model):
            
         
 
-        #dec_objs, dec_triples = dec_objs.cuda(), dec_triples.cuda()
+        dec_objs, dec_triples = dec_objs.cuda(), dec_triples.cuda()
         
 
         # all_pred_boxes = []
@@ -197,5 +197,5 @@ def evaluate():
 
 if __name__ == "__main__":
     print(torch.__version__)
-    device=torch.device("cpu")
+    device=torch.device("cuda:0")
     evaluate()

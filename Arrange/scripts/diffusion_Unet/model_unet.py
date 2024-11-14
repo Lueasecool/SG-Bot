@@ -52,11 +52,11 @@ class DiffusionScene(Module):
         s, p, o = [x.squeeze(1) for x in [s, p, o]]  # Now have shape (T,)
         #print(T)
         edges = torch.stack([s, o], dim=1)  # Shape is (T, 2)
-        #print(edges)
+        print("edges'shape:,",edges.shape)
         obj_embed = self.obj_embeddings_ec(objs)
-        #print("obj_embding:",obj_embed.shape)
+        print("obj_embding:",obj_embed.shape)
         pred_embed = self.pred_embeddings_ec(p)
-        
+        print("pre_embed's shape:",pred_embed.shape)
         latent_obj_f, latent_pred_f = self.gconv_net_enc(obj_embed, pred_embed, edges)
 
         return obj_embed, pred_embed, latent_obj_f, latent_pred_f #obj_embed,latent_obj_f
@@ -75,7 +75,7 @@ class DiffusionScene(Module):
         # print("locations:", locations.shape)  # 这里可能会输出一个元组
         # print("quaternion_xyzw:", quaternion_xyzw.shape)
         layout_info=torch.cat([bbox_es,quaternion_xyzw],dim=-1).contiguous()
-        obj_embed,_,latent_obj_f,_=self.encoder(datum)
+        obj_embed,_,latent_obj_f,_=self.encoder(class_ids,triples)
         self.loss = self.diffusion.get_loss_iter_v2(obj_embed=obj_embed, preds=triples, data=layout_info, condition_cross=latent_obj_f)
         return self.loss
         

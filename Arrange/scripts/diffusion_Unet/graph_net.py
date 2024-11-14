@@ -203,12 +203,12 @@ class GraphTripleConv(nn.Module):
         # of shape (num_objs, Dout)
         new_obj_vecs = self.net2(pooled_obj_vecs)
 
-        # if self.residual:
+        if self.residual:
            
-        #     projected_obj_vecs = self.linear_projection(obj_vecs)
-        #     new_obj_vecs = new_obj_vecs + projected_obj_vecs
-        #     # new
-        #     new_p_vecs = new_p_vecs + self.linear_projection_pred(pred_vecs)
+            projected_obj_vecs = self.linear_projection(obj_vecs)
+            new_obj_vecs = new_obj_vecs + projected_obj_vecs
+            # new
+            new_p_vecs = new_p_vecs + self.linear_projection_pred(pred_vecs)
 
         return new_obj_vecs, new_p_vecs
 
@@ -250,3 +250,32 @@ class GraphTripleConvNet(nn.Module):
             gconv = self.gconvs[i]
             obj_vecs, pred_vecs = gconv(obj_vecs, pred_vecs, edges)
         return obj_vecs, pred_vecs
+    
+if __name__=="__main__":
+    net=GraphTripleConvNet(320,128,num_layers=2,hidden_dim=512,residual=True,pooling='avg',mlp_normalization='none',output_dim=None)
+
+    net2=GraphTripleConvNet(256,256,num_layers=5,hidden_dim=512,residual=True,pooling='avg',mlp_normalization='none',output_dim=1280)
+
+    net3=GraphTripleConvNet(1024,1024,num_layers=5,hidden_dim=512,residual=False,pooling='avg',mlp_normalization='none',output_dim=None)
+
+    net4=GraphTripleConvNet(1024,1024,num_layers=5,hidden_dim=512,residual=False,pooling='avg',mlp_normalization='none',output_dim=1280)
+
+    num_objs = 64  # 例如，64个对象  
+    num_triples = 128  # 例如，128个三元组  
+    feature_dim = 256  # 特征维度  
+
+    data1 = torch.randn(num_objs, 320)  # 对象特征  
+    data2 = torch.randn(num_triples, 128)  # 谓词特征  
+    data3 = torch.randint(0, num_objs, (num_triples, 2))  # 边信息，表示三元组的索引  
+    print(data3.shape)
+    torch.onnx.export(  
+    net,  
+    (data1, data2, data3),  # 输入元组  
+    'model_resiual.onnx',  
+    export_params=True,
+    opset_version=12,  
+    )  
+    out=net(data1,data2,data3)
+    print(out[0].shape)
+    print(out[1].shape)
+    

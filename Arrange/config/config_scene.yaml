@@ -1,6 +1,6 @@
 root:
-    path: "/remote-home/2332082/data/sgbot_dataset/raw/7b4acb843fd4b0b335836c728d324152"
-
+    raw: "/remote-home/2332082/data/sgbot_dataset/raw"
+    file_path: "/remote-home/2332082/data/sgbot_dataset/train_scenes.txt"
 
 data:
     dataset_type: "cached_threedfront"
@@ -93,7 +93,7 @@ feature_extractor:
 
 training:
     splits: ["train", "val"]
-    epochs: 1000
+    epochs: 2000
     steps_per_epoch: 500
     batch_size: 64
     save_frequency: 100

@@ -41,7 +41,7 @@ def render_box(obj_ids, predBoxes, predAngles, render_type='onlybox',
     if len(str_append) > 0:
         render_type += str_append
     os.makedirs(scene_path, exist_ok=True)
-    scene.export(os.path.join(scene_path, "{0}_{1}.glb".format('hello', render_type)))
+    scene.export(os.path.join(scene_path, "{0}_{1}.glb".format('hello_new', render_type)))
 
     
     # scene.show()
@@ -83,9 +83,9 @@ def get_bbox(boxes,obj_ids, colors):
     'teaspoon',
     'obstacle']
     for j in range(0, boxes.shape[0]):
-        query_label = classes[obj_ids[j]-1].strip('\n')
+        query_label = classes[obj_ids[j]].strip('\n')
         print("rendering", classes[obj_ids[j]].strip('\n') )
-        if query_label == '_scene_' or query_label == 'support_table':
+        if query_label == '_scene_' or query_label == 'obstacle':
             continue
         box_points = params_to_8points_3dfront(boxes[j], degrees=True)
         print('box_points',box_points)
