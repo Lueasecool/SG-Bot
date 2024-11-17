@@ -6,18 +6,44 @@ import os
 import torch
 import trimesh
 import seaborn as sns
-
+import json 
 import pyrender
+from PIL import Image
+def normalize_box_params(box_params, scale=3):
+    """ Normalize the box parameters for more stable learning utilizing the accumulated dataset statistics
+
+    :param box_params: float array of shape [7] containing the box parameters
+    :param scale: float scalar that scales the parameter distribution
+    :return: normalized box parameters array of shape [7]
+    """
+    mean = np.array([ 0.2610482 ,  0.22473196,  0.14623462,  0.0010283 , -0.02288815 , 0.20876316])#np.array([ 2.42144732e-01,  2.35105852e-01,  1.53590141e-01, -1.54968627e-04, -2.68763962e-02,  2.23784580e-01 ])
+    std = np.array([0.31285113, 0.21937416, 0.17070778, 0.14874465, 0.1200992,  0.11501499])#np.array([ 0.27346058, 0.23751527, 0.18529049, 0.12504842, 0.13313938 ,0.12407406 ])
+
+    return scale * ((box_params - mean) / std)
+
+def batch_torch_denormalize_box_params(box_params, scale=3):
+    """ Denormalize the box parameters utilizing the accumulated dateaset statistics
+
+    :param box_params: float tensor of shape [N, 6] containing the 6 box parameters, where N is the number of boxes
+    :param scale: float scalar that scales the parameter distribution
+    :return: float tensor of shape [N, 6], the denormalized box parameters
+    """
+
+    mean = torch.tensor([ 0.2610482 ,  0.22473196,  0.14623462,  0.0010283 , -0.02288815 , 0.20876316]).reshape(1,-1).float().cuda()#torch.tensor([ 2.42144732e-01,  2.35105852e-01,  1.53590141e-01, -1.54968627e-04, -2.68763962e-02,  2.23784580e-01 ]).reshape(1,-1).float().cuda()
+    std = torch.tensor([0.31285113, 0.21937416, 0.17070778, 0.14874465, 0.1200992,  0.11501499]).reshape(1,-1).float().cuda()#torch.tensor([ 0.27346058, 0.23751527, 0.18529049, 0.12504842, 0.13313938 ,0.12407406 ]).reshape(1,-1).float().cuda()
+
+    return (box_params * std) / scale + mean
+
 def load_config(config_file):
     with open(config_file, "r") as f:
         config = yaml.load(f, Loader=Loader)
     return config
 
-def render_box(obj_ids, predBoxes, predAngles, render_type='onlybox',
+def render(name_dict,obj_ids, predBoxes, predAngles, render_type='scene',
                store_img=False, render_boxes=False, demo=False, visual=False, without_lamp=False,
                str_append="", mani=0, missing_nodes=None, manipulated_nodes=None, objs_before=None, store_path=None):
     os.makedirs(store_path,exist_ok=True)
-    if render_type not in ['txt2shape', 'retrieval', 'onlybox']:
+    if render_type not in ['txt2shape', 'scene', 'onlybox']:
         raise ValueError('Render type needs to be either set to txt2shape or retrieval or onlybox.')
     color_palette = np.array(sns.color_palette('hls', 100))
 
@@ -29,8 +55,18 @@ def render_box(obj_ids, predBoxes, predAngles, render_type='onlybox',
     # mesh_dir = os.path.join(store_path, render_type, 'object_meshes', "hello")
     # os.makedirs(mesh_dir, exist_ok=True)
     
+    
+
     if render_type == 'onlybox':
         lamp_mesh_list, trimesh_meshes = get_bbox(box_and_angle,obj_ids, colors=color_palette[obj_ids])
+    
+    elif render_type=="scene":
+        trimesh_meshes, raw_meshes = get_database_objects(name_dict,box_and_angle, 
+                                                                         render_boxes=render_boxes,
+                                                                            colors=color_palette 
+                                                                            )
+        
+
     else:
         raise NotImplementedError
 
@@ -60,7 +96,74 @@ def render_box(obj_ids, predBoxes, predAngles, render_type='onlybox',
         return trimesh_meshes
 
 
+def get_database_objects(name_dict,boxes, render_boxes=False, colors=None):
+    
+    # os.makedirs(mesh_dir, exist_ok=True)
+   
+    colors = iter(colors)
+    
+    trimesh_meshes = []
+    raw_meshes = []
+    print("boxes_num",boxes.shape[0])
+    print("dict_len:",len(name_dict.keys()))
 
+    model_base_path = "/remote-home/2332082/data/sgbot_dataset/models"
+    assert boxes.shape[0]==len(name_dict)
+    keys=list(name_dict.keys())
+    for i in range(len(keys)):
+
+        name=name_dict[keys[i]]
+        if "support_table" not in name:
+            model_path = os.path.join(model_base_path,keys[i],f"{name}.obj")
+        
+            texture_path = os.path.join(model_base_path,keys[i], f"{name}.png")
+        else:
+            name=name.replace("_support_table","")
+            model_path = os.path.join(model_base_path,keys[i],f"{name}.obj")
+            texture_path = os.path.join(model_base_path,keys[i],"aefc493c1bfb5fa2.png")
+
+
+
+        color = next(colors)
+
+        # Load the furniture and scale it as it is given in the dataset
+        tr_mesh = trimesh.load(model_path, force="mesh")
+        tr_mesh = trimesh.Trimesh(vertices=tr_mesh.vertices, faces=tr_mesh.faces, process=False)
+        
+      
+        texture_image = Image.open(texture_path)
+        texture_image = np.array(texture_image)  # Convert to numpy array
+
+
+        texture_visuals = trimesh.visual.TextureVisuals(image=texture_image)
+
+        # Apply texture visuals to the mesh
+        tr_mesh.visual = texture_visuals
+
+        tr_mesh.visual.vertex_colors = color
+        tr_mesh.visual.face_colors = color
+
+        raw_meshes.append(tr_mesh.copy())
+
+        #tr_mesh.export(os.path.join(mesh_dir, query_label+'_'+str(cat_ids[j])+'_'+str(instance_id)+".obj"))
+   
+    # tr_mesh.visual.material.image = Image.open(texture_path)
+        theta = boxes[i, -1].item() * (np.pi / 180)
+        R = np.zeros((3, 3))
+        R[0, 0] = np.cos(theta)
+        R[0, 2] = -np.sin(theta)
+        R[2, 0] = np.sin(theta)
+        R[2, 2] = np.cos(theta)
+        R[1, 1] = 1.
+        t = boxes[i, 3:6].detach().cpu().numpy()
+        tr_mesh.vertices[...] = tr_mesh.vertices.dot(R) + t#计算旋转矩阵和位移，将物体的位置和方向应用到模型顶点
+        trimesh_meshes.append(tr_mesh)
+        if render_boxes:
+            box_points = params_to_8points_3dfront(boxes[i], degrees=True)
+            trimesh_meshes.append(create_bbox_marker(box_points, tube_radius=0.006, color=color))
+
+
+    return trimesh_meshes, raw_meshes
 
 def get_bbox(boxes,obj_ids, colors):
     trimesh_meshes = []

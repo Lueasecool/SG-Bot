@@ -767,19 +767,19 @@ class UNet1DModel(nn.Module):
         s, p, o = [i.squeeze(1) for i in [s, p, o]]  # Now have shape (T,)
         edges = torch.stack([s, o], dim=1)  # Shape is (T, 2)
         
-        print("obj_embed:",obj_embed.shape)#256
+        # print("obj_embed:",obj_embed.shape)#256
         box_embed = self.box_embeddings(box_t)
         pred_embed = self.pred_embeddings(p)
         
-        print("shape of box",box_embed.shape)
+        # print("shape of box",box_embed.shape)
         obj_box_embed = torch.cat([obj_embed, box_embed], dim=1)
-        print("shape of obj_box",obj_box_embed.shape)
-        print("pred_embed shape",pred_embed.shape)
+        # print("shape of obj_box",obj_box_embed.shape)
+        # print("pred_embed shape",pred_embed.shape)
         if enable_t_emb:
             assert t_emb is not None
             t_emb = self.box_time_emb(t_emb)
             obj_box_embed = torch.cat([obj_box_embed, t_emb], dim=1)
-        print(obj_box_embed.shape,pred_embed.shape,edges.shape)
+        # print(obj_box_embed.shape,pred_embed.shape,edges.shape)
         box_rel_embed, _ = self.box_graph_cov(obj_box_embed, pred_embed, edges)
         return box_rel_embed
 

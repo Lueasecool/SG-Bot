@@ -13,14 +13,16 @@ import torch.nn.parallel
 import json
 import torch.utils.data
 from omegaconf import OmegaConf
-from data_util.data_read import my_Dataset
-from utils import render_box
+from data_util.data_readfull import my_Dataset
+from train_iter.utils import batch_torch_denormalize_box_params
+from utils import render
 
 
 from scripts.diffusion_Unet.model_unet import DiffusionScene
 from scripts.train_iter.utils import load_config
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default="/remote-home/2332082/data/sgbot_dataset/raw/7b4acb843fd4b0b335836c728d324152", help="dataset path")
+parser.add_argument('--dataset', type=str, default="/remote-home/2332082/data/sgbot_dataset/raw", help="dataset path")
+parser.add_argument('--filepath', type=str, default="/remote-home/2332082/data/sgbot_dataset/train_scenes.txt", help="dataset path")
 parser.add_argument('--with_feats', type=bool, default=False, help="Load Feats directly instead of points.")
 parser.add_argument('--if_debug',type=bool, default=False)
 
@@ -93,7 +95,7 @@ def validate_constrains_loop(img_path, test_dataset, model):
         dec_objs, dec_triples = data['class_ids'], data['triples']
            
         
-
+        name_dict=data["all_names"]
         dec_objs, dec_triples = dec_objs.cuda(), dec_triples.cuda()
         
 
@@ -111,8 +113,8 @@ def validate_constrains_loop(img_path, test_dataset, model):
             print(boxes_pred.shape)
             # if modelArgs['bin_angle']:
             #     angles_pred = -180 + (torch.argmax(angles_pred, dim=1, keepdim=True) + 1)* 15.0 # angle (previously minus 1, now add it back)
-            #      #将标准化的边界框参数转换回原始值
-            #     boxes_pred_den = batch_torch_destandardize_box_params(boxes_pred, file=normalized_file) # mean, std
+                 #将标准化的边界框参数转换回原始值
+            boxes_pred_den = batch_torch_denormalize_box_params(boxes_pred) # mean, std
            
             # else:
             #     #将正余弦的弧度值转换为角度
@@ -126,7 +128,7 @@ def validate_constrains_loop(img_path, test_dataset, model):
             # layout and shape visualization through open3d
         #print("rendering", [classes[i].strip('\n') for i in dec_objs])
         print("rendering obj ids:",dec_objs)
-        render_box(dec_objs.detach().cpu().numpy(), boxes_pred, angles_pred,
+        render(name_dict,dec_objs.detach().cpu().numpy(), boxes_pred_den, angles_pred,
                 store_path=img_path)
          
 
@@ -163,8 +165,8 @@ def evaluate():
     random.seed(48)
     torch.manual_seed(48)
 
-    test_dataset_no_changes=my_Dataset(args.dataset,args.with_feats,args.if_debug)
-    test_dataset_no_changes.get_goal_files()
+    test_dataset_no_changes=my_Dataset(args.dataset,args.filepath,args.with_feats,args.if_debug)
+ 
     config=load_config(args.config_file)
    
     # args.visualize = False if args.gen_shape == False else args.visualize

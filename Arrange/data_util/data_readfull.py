@@ -7,11 +7,14 @@ import torch
 import numpy as np
 import copy
 import torch.nn.utils.rnn as rnn_utils
+import sys
+sys.path.append('./Arrange')
+sys.path.append('./Arrange/scripts')
 #import graphto3d.dataset.util as util
 from tqdm import tqdm
 import json
 #from graphto3d.helpers.psutil import FreeMemLinux
-#from graphto3d.helpers.util import normalize_box_params
+from scripts.train_iter.utils import normalize_box_params
 import random
 import pickle
 
@@ -80,7 +83,7 @@ class my_Dataset(data.Dataset):
         locations=[]
         angles=[]
         triples=[]
-
+        names={}
 
         path_idx=os.path.join(self.data_root,self.goal_file_path[idx])#布局信息文件路径
         scene_graph_path = path_idx.replace('_goal_view-2', '_goal_scene_graph')#图信息文件路径
@@ -91,9 +94,11 @@ class my_Dataset(data.Dataset):
             object_data=data["objects"]
             for f in object_data:#每个物体的信息
                 class_ids.append(f['class_id'])
-                bbox_es.append(f['param6'])
+                bbox_es.append(normalize_box_params(f['param6']))
+                # bbox_es.append((f['param6']))
                 locations.append(f['location'])
                 angles.append(f['quaternion_xyzw'])
+                names[f["class"]]=f["name"]
         with open(scene_graph_path, 'r', encoding='utf-8') as file: 
             data_graph=json.load(file)
             for r in data_graph["relationships"]:
@@ -110,7 +115,8 @@ class my_Dataset(data.Dataset):
             "bbox_es": bbox_es,
             "locations": locations,
             'quaternion_xyzw':angles,
-            "triples":triples
+            "triples":triples,
+            "all_names":names
         }
         return self.convert_tensor(datum)
         #return datum  
@@ -136,7 +142,8 @@ class my_Dataset(data.Dataset):
             "bbox_es": torch.from_numpy(np.array(datum["bbox_es"],dtype=np.float32)),
             "locations": torch.from_numpy(np.array(datum["locations"],dtype=np.float32)),
             "quaternion_xyzw":torch.from_numpy(np.array(datum['quaternion_xyzw'],dtype=np.float32)),
-            "triples":torch.from_numpy(np.array(datum['triples'],dtype=np.int64))
+            "triples":torch.from_numpy(np.array(datum['triples'],dtype=np.int64)),
+            "all_names":datum['all_names']
          }
         return tensors
     
@@ -167,17 +174,19 @@ class my_Dataset(data.Dataset):
         # "quaternion_xyzw": rnn_utils.pad_sequence([item['quaternion_xyzw'] for item in batch], batch_first=True),
         # "triples":rnn_utils.pad_sequence([item['triples'] for item in batch],batch_first=True)
         
-        all_objs, all_boxes, all_triples = [], [], []
+        all_objs, all_boxes, all_triples= [], [], []
         all_locations,all_angles=[],[]
         for i in range(len(batch)):
             (objs, triples, boxes) = batch[i]['class_ids'], batch[i]['triples'], batch[i]['bbox_es']
             locations,quaternion_xyzw= batch[i]["locations"],batch[i]["quaternion_xyzw"]
+            names=batch[i]["all_names"]
             #angles=self.quaternion_to_sin_cos(quaternion_xyzw)
             all_triples.append(triples)
             all_objs.append(objs)
             all_boxes.append(boxes)
             all_angles.append(quaternion_xyzw)
             all_locations.append(locations)
+            
         all_objs = torch.cat(all_objs)
         all_boxes=torch.cat(all_boxes)
         all_triples=torch.cat(all_triples)
@@ -190,7 +199,8 @@ class my_Dataset(data.Dataset):
                 "triples":all_triples,
                 "bbox_es":all_boxes,
                 "locations":all_locations,
-                "quaternion_xyzw":all_angles
+                "quaternion_xyzw":all_angles,
+                "all_names":names
                 }
         
         
@@ -218,4 +228,5 @@ if __name__=="__main__":
         print(batch)
         print(batch['bbox_es'].shape)
         print(batch['quaternion_xyzw'].shape)
+        print(batch["all_names"])
         break  # 只输出一个批次的数据

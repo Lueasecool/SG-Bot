@@ -30,7 +30,7 @@ from diffusion_Unet.diffusion_point import DiffusionPoint
 def main(args):
     
     now = datetime.now()
-    folder_name = f"Arrange_{now.hour}-{now.min}"
+    folder_name = f"Arrange_{now.hour}-{now.mi}"
 
 # 创建文件夹
     os.makedirs(folder_name, exist_ok=True)
@@ -87,9 +87,9 @@ def main(args):
         network.train()
         #for b, sample in zip(range(steps_per_epoch), yield_forever(train_loader)):
         for b, sample in enumerate(tqdm(train_loader, leave=False, desc=f"Epoch {epoch + 1}/{num_epochs}",colour="#005500")):
-            # Move everything to device
+            #Move everything to device
             for k, v in sample.items():
-                if not isinstance(v, list):#只有当 v 不是列表,才将值调到(devcie)
+                if not isinstance(v, list) and not isinstance(v, dict) :#只有当 v 不是列表,才将值调到(devcie)
                     sample[k] = v.to(device)
             batch_loss = train_on_batch(network, optimizer, sample, config)
             print('loss:',batch_loss)

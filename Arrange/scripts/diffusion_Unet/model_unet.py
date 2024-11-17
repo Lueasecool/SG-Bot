@@ -52,11 +52,11 @@ class DiffusionScene(Module):
         s, p, o = [x.squeeze(1) for x in [s, p, o]]  # Now have shape (T,)
         #print(T)
         edges = torch.stack([s, o], dim=1)  # Shape is (T, 2)
-        print("edges'shape:,",edges.shape)
+        # print("edges'shape:,",edges.shape)
         obj_embed = self.obj_embeddings_ec(objs)
-        print("obj_embding:",obj_embed.shape)
+        # print("obj_embding:",obj_embed.shape)
         pred_embed = self.pred_embeddings_ec(p)
-        print("pre_embed's shape:",pred_embed.shape)
+        # print("pre_embed's shape:",pred_embed.shape)
         latent_obj_f, latent_pred_f = self.gconv_net_enc(obj_embed, pred_embed, edges)
 
         return obj_embed, pred_embed, latent_obj_f, latent_pred_f #obj_embed,latent_obj_f
