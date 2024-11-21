@@ -14,6 +14,8 @@ import sys
 import os
 sys.path.append('./SG-Bot/Arrange')
 sys.path.append('./SG-Bot/Arrange/scripts')
+
+#加入scene_ids
 from diffusion_Unet.diffusion_gauss import GaussianDiffusion
 
 def get_betas(schedule_type, b_start, b_end, time_num):
@@ -134,12 +136,14 @@ class DiffusionPoint(nn.Module):
         assert losses.shape == t.shape == torch.Size([B])
         return losses.mean(), loss_dict
     
-    def get_loss_iter_v2(self, obj_embed, preds, data, condition_cross=None):
+    def get_loss_iter_v2(self, obj_embed, preds, data,scene_ids, condition_cross=None):
         B, _ = data.shape
-
-        t = torch.randint(0, self.diffusion.num_timesteps, size=(B,), device=data.device)
-        
+        unique_scenes, inv_idx = np.unique(scene_ids.cpu(), return_inverse=True)
+        t = torch.randint(0, self.diffusion.num_timesteps, size=unique_scenes.shape,
+                          device=data.device)  # we want to have different t for each scene not each obj
+        t = t[inv_idx]
         assert len(t) == B
+      
 
         loss = self.diffusion.p_losses(self._denoise, data, obj_embed, triples=preds, t=t, condition_cross=condition_cross)
         assert t.shape == torch.Size([B])

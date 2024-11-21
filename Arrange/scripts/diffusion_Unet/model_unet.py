@@ -70,13 +70,14 @@ class DiffusionScene(Module):
         locations=datum["locations"]
         quaternion_xyzw=datum['quaternion_xyzw']  
         triples=datum['triples']
+        scene_ids=datum["all_obj_to_scene"]
         # print("class_ids:", class_ids.shape)
         # print("bbox_es:", bbox_es.shape)
         # print("locations:", locations.shape)  # 这里可能会输出一个元组
         # print("quaternion_xyzw:", quaternion_xyzw.shape)
         layout_info=torch.cat([bbox_es,quaternion_xyzw],dim=-1).contiguous()
         obj_embed,_,latent_obj_f,_=self.encoder(class_ids,triples)
-        self.loss = self.diffusion.get_loss_iter_v2(obj_embed=obj_embed, preds=triples, data=layout_info, condition_cross=latent_obj_f)
+        self.loss = self.diffusion.get_loss_iter_v2(obj_embed=obj_embed, preds=triples, data=layout_info, scene_ids=scene_ids,condition_cross=latent_obj_f)
         return self.loss
         
         # loss,loss_dict=self.diffusion.get_loss_iter(

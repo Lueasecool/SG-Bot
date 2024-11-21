@@ -86,9 +86,11 @@ class my_Dataset(data.Dataset):
         names={}
 
         path_idx=os.path.join(self.data_root,self.goal_file_path[idx])#布局信息文件路径
+        #print(path_idx)
         scene_graph_path = path_idx.replace('_goal_view-2', '_goal_scene_graph')#图信息文件路径
+        #print(scene_graph_path)
         instance2mask=self.instance_id2mask(path_idx)
-       
+
         with open(path_idx, 'r', encoding='utf-8') as file:
             data = json.load(file)#
             object_data=data["objects"]
@@ -105,7 +107,7 @@ class my_Dataset(data.Dataset):
                 if r[0] in instance2mask.keys() and r[1] in instance2mask.keys():  #r[0], r[1] -> instance_id
                     subject = instance2mask[r[0]]-1 #! instance2mask[r[0] -> 实例在场景中的编号/索引 - 1, 最后一个node '_scene_' 放最后
                     object = instance2mask[r[1]]-1
-                    predicate = r[2] +1
+                    predicate = r[2] 
                     if subject >= 0 and object >= 0:
                          triples.append([subject, predicate, object])
                 else:
@@ -176,21 +178,31 @@ class my_Dataset(data.Dataset):
         
         all_objs, all_boxes, all_triples= [], [], []
         all_locations,all_angles=[],[]
+        all_obj_to_scene=[]
+        obj_offset = 0
         for i in range(len(batch)):
             (objs, triples, boxes) = batch[i]['class_ids'], batch[i]['triples'], batch[i]['bbox_es']
             locations,quaternion_xyzw= batch[i]["locations"],batch[i]["quaternion_xyzw"]
             names=batch[i]["all_names"]
+            num_objs, num_triples = objs.size(0), triples.size(0)
             #angles=self.quaternion_to_sin_cos(quaternion_xyzw)
+            if triples.dim() > 1:
+                    triples = triples.clone()
+                    triples[:, 0] += obj_offset
+                    triples[:, 2] += obj_offset
+            all_obj_to_scene.append(torch.LongTensor(num_objs).fill_(i))
             all_triples.append(triples)
             all_objs.append(objs)
             all_boxes.append(boxes)
             all_angles.append(quaternion_xyzw)
             all_locations.append(locations)
+            obj_offset += num_objs
             
         all_objs = torch.cat(all_objs)
         all_boxes=torch.cat(all_boxes)
         all_triples=torch.cat(all_triples)
         all_locations=torch.cat(all_locations)
+        all_obj_to_scene = torch.cat(all_obj_to_scene)
         # 将列表转换为张量
        
         all_angles=torch.cat(all_angles)
@@ -200,7 +212,8 @@ class my_Dataset(data.Dataset):
                 "bbox_es":all_boxes,
                 "locations":all_locations,
                 "quaternion_xyzw":all_angles,
-                "all_names":names
+                "all_names":names,
+                "all_obj_to_scene":all_obj_to_scene
                 }
         
         
@@ -220,7 +233,7 @@ if __name__=="__main__":
     #     print(i)
     # print(type(files))
     print(len(my_data.goal_file_path))
-    batch_size = 4  # 设置批次大小
+    batch_size = 2  # 设置批次大小
     data_loader = data.DataLoader(my_data, batch_size=batch_size, shuffle=True,collate_fn=my_data.collate_fn)
 
     # 输出一个批次的数据

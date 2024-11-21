@@ -785,7 +785,7 @@ class UNet1DModel(nn.Module):
 
     def forward(self, box_t, obj_embed, triples, timesteps=None, context=None,**kwargs):
         """
-        Apply the model to an input batch.
+        Apply the model to an input batch.kuosan
         :param x: an [N x C x ...] Tensor of inputs.
         :param timesteps: a 1-D batch of timesteps.
         :param context: conditioning plugged in via crossattn
